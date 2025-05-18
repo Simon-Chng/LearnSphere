@@ -130,35 +130,43 @@ The application uses PostgreSQL with SQLAlchemy ORM. Below are the database tabl
 | id | Integer | Primary key |
 | name | String(100) | Model name |
 | is_avail | Boolean | Availability status |
+| model_type | String(20) | Type of model (default: 'ollama') |
 
 ### Conversations Table
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | Integer | Primary key |
-| user_id | Integer | Foreign key to users.id |
-| model_id | Integer | Foreign key to model_list.id |
-| category_id | Integer | Foreign key to categories.id |
+| user_id | Integer | Foreign key to users.id (CASCADE on delete/update) |
+| model_id | Integer | Foreign key to model_list.id (SET NULL on delete) |
+| category_id | Integer | Foreign key to categories.id (SET NULL on delete) |
 | title | String | Conversation title |
 | created_at | DateTime | Creation timestamp |
-| updated_at | DateTime | Last update timestamp |
+| updated_at | DateTime | Last update timestamp (auto-updates) |
 
 ### Messages Table
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | Integer | Primary key |
-| conversation_id | Integer | Foreign key to conversations.id |
+| conversation_id | Integer | Foreign key to conversations.id (CASCADE on delete/update) |
 | role | String | Message role (user/assistant) |
 | content | Text | Message content |
 | created_at | DateTime | Message timestamp |
 
 ### Entity Relationships
 
-- User (1) → Conversations (many)
-- Category (1) → Conversations (many)
-- ModelList (1) → Conversations (many)
-- Conversation (1) → Messages (many)
+- User (1) → Conversations (many): One user can have multiple conversations
+- Category (1) → Conversations (many): One category can have multiple conversations
+- ModelList (1) → Conversations (many): One model can be used in multiple conversations
+- Conversation (1) → Messages (many): One conversation can have multiple messages
+
+### Key Features
+
+- Cascading deletes for user-conversation relationships
+- Automatic timestamp updates for conversation modifications
+- Nullable model and category references in conversations
+- Text type for message content to support long messages
 
 ## Development
 
