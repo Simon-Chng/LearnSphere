@@ -185,3 +185,20 @@
     font-size: 0.9rem;
   }
 }
+
+.admin-controls {
+  margin-bottom: 15px;
+}
+
+.refresh-button {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.refresh-button:hover {
+  background-color: #45a049;
+}

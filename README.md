@@ -180,7 +180,7 @@ Create a `.env` file in the backend directory with the following variables:
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/learn_sphere
 FLASK_ENV=development
 FLASK_APP=main.py
-SECRET_KEY=your_secret_key_here
+GROQ_API_KEY=your_groq_api_key_here
 ```
 
 ## Database Setup

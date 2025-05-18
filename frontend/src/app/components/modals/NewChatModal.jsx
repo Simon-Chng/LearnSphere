@@ -8,7 +8,7 @@ import '../../styles/modal.css';
  * @param {Object} props - Component props.
  * @param {boolean} props.isOpen - Whether the modal is visible.
  * @param {Function} props.onClose - Function to call when the modal is closed or cancelled.
- * @param {string[]} props.availableModels - Array of model names available for selection.
+ * @param {Array<{ name: string, model_type: string }>} props.availableModels - Array of model objects with name and type.
  * @param {string} props.selectedModel - The initially selected model.
  * @param {Array<{ id: string|number, name: string, icon: string }>} props.categories - List of chat categories.
  * @param {string|number} props.selectedCategory - The initially selected category.
@@ -41,6 +41,28 @@ const NewChatModal = ({
 
   const handleCreate = () => {
     onSelect(selectedModelTemp, selectedCategoryTemp, true);
+  };
+
+  // Group models by type
+  const modelsByType = availableModels.reduce((acc, model) => {
+    // Get model type - fallback to 'ollama' if not specified
+    const modelType = model.model_type || 'ollama';
+    
+    if (!acc[modelType]) {
+      acc[modelType] = [];
+    }
+    
+    acc[modelType].push(model.name || model);
+    return acc;
+  }, {});
+
+  // Get model type display name
+  const getModelTypeDisplay = (type) => {
+    switch(type) {
+      case 'ollama': return 'Local (Ollama)';
+      case 'groq': return 'Cloud (Groq)';
+      default: return type.charAt(0).toUpperCase() + type.slice(1);
+    }
   };
 
   return (
@@ -80,16 +102,21 @@ const NewChatModal = ({
           <>
             <p>Please select a model for your chat:</p>
             <div className="model-list">
-              {availableModels.map((modelName) => (
-                <div
-                  key={modelName}
-                  className={`model-item ${modelName === selectedModelTemp ? 'active' : ''}`}
-                  onClick={() => setSelectedModelTemp(modelName)}
-                >
-                  <span className="model-name">{modelName}</span>
-                  {modelName === selectedModelTemp && (
-                    <span className="model-check">&#x2713;</span>
-                  )}
+              {Object.entries(modelsByType).map(([type, models]) => (
+                <div key={type} className="model-group">
+                  <h3 className="model-type-header">{getModelTypeDisplay(type)}</h3>
+                  {models.map((modelName) => (
+                    <div
+                      key={modelName}
+                      className={`model-item ${modelName === selectedModelTemp ? 'active' : ''}`}
+                      onClick={() => setSelectedModelTemp(modelName)}
+                    >
+                      <span className="model-name">{modelName}</span>
+                      {modelName === selectedModelTemp && (
+                        <span className="model-check">&#x2713;</span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>

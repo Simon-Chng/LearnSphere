@@ -17,7 +17,13 @@ const AdminPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("users");
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const router = useRouter();
+
+  // Refresh the data
+  const refreshData = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
 
   useEffect(() => {
     const guestMode = localStorage.getItem("isGuest") === "true";
@@ -78,7 +84,7 @@ const AdminPage = () => {
         setError(err.message);
         setLoading(false);
       });
-  }, [router]);
+  }, [router, refreshTrigger]);
 
   if (loading) {
     return (
@@ -161,6 +167,7 @@ const AdminPage = () => {
               <tr>
                 <th>ID</th>
                 <th>Name</th>
+                <th>Model Type</th>
                 <th>Available</th>
               </tr>
             </thead>
@@ -169,6 +176,7 @@ const AdminPage = () => {
                 <tr key={model.id}>
                   <td>{model.id}</td>
                   <td>{model.name}</td>
+                  <td>{model.model_type || "ollama"}</td>
                   <td>{model.is_avail ? "Yes" : "No"}</td>
                 </tr>
               ))}
@@ -186,6 +194,7 @@ const AdminPage = () => {
                 <th>Category ID</th>
                 <th>Title</th>
                 <th>Created At</th>
+                <th>Updated At</th>
               </tr>
             </thead>
             <tbody>
@@ -197,6 +206,7 @@ const AdminPage = () => {
                   <td>{conv.category_id}</td>
                   <td>{conv.title}</td>
                   <td>{new Date(conv.created_at).toLocaleString()}</td>
+                  <td>{conv.updated_at ? new Date(conv.updated_at).toLocaleString() : "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -210,7 +220,7 @@ const AdminPage = () => {
                 <th>ID</th>
                 <th>Conversation ID</th>
                 <th>Role</th>
-                <th>Content</th>
+                <th>Content Preview</th>
                 <th>Created At</th>
               </tr>
             </thead>
@@ -220,7 +230,11 @@ const AdminPage = () => {
                   <td>{msg.id}</td>
                   <td>{msg.conversation_id}</td>
                   <td>{msg.role}</td>
-                  <td>{msg.content}</td>
+                  <td>
+                    {msg.content.length > 100 
+                      ? `${msg.content.substring(0, 100)}...` 
+                      : msg.content}
+                  </td>
                   <td>{new Date(msg.created_at).toLocaleString()}</td>
                 </tr>
               ))}
@@ -235,6 +249,11 @@ const AdminPage = () => {
   return (
     <div className="admin-container">
       <h1>Admin Dashboard</h1>
+      <div className="admin-controls">
+        <button className="refresh-button" onClick={refreshData}>
+          Refresh Data
+        </button>
+      </div>
       <div className="admin-tabs">
         <button
           className={activeTab === "users" ? "active" : ""}

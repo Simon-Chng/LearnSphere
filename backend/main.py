@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from langchain.llms import Ollama
+from langchain_groq import ChatGroq
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 import ollama
@@ -12,6 +13,14 @@ import models
 import database
 import auth
 from auth_routes import router as auth_router
+from dotenv import load_dotenv
+import requests
+
+# Load environment variables
+load_dotenv()
+
+# Get Groq API key
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # Create database tables
 models.Base.metadata.create_all(bind=database.engine)
@@ -45,6 +54,35 @@ def load_prompt(category: str) -> str:
             return f.read().strip()
     except FileNotFoundError:
         return ""  # Return empty string if prompt file not found
+
+def get_groq_models():
+    """Get list of models supported by Groq API
+    
+    If API call fails, returns a basic model list as fallback
+    
+    Returns:
+        List[str]: List of model IDs
+    """
+    if not GROQ_API_KEY:
+        return []
+    
+    try:
+        groq_response = requests.get(
+            "https://api.groq.com/v1/models",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"}
+        )
+        
+        if groq_response.status_code == 200:
+            groq_models_data = groq_response.json()
+            models_list = [model["id"] for model in groq_models_data.get("data", [])]
+            print(f"Retrieved {len(models_list)} models from Groq API: {models_list}")
+            return models_list
+        else:
+            print(f"Error fetching Groq models: {groq_response.status_code} - {groq_response.text}")
+            return ["llama3-70b-8192", "llama3-8b-8192", "gemma-7b-it"]
+    except Exception as e:
+        print(f"Exception when fetching Groq models: {str(e)}")
+        return ["llama3-70b-8192", "llama3-8b-8192", "gemma-7b-it"]
 
 # Category-specific prompts
 CATEGORY_PROMPTS = {
@@ -110,10 +148,13 @@ async def get_models(
     try:
         # Get available models from Ollama
         ollama_models = ollama.list()
-        available_model_names = set()
+        available_ollama_names = set()
         
         if ollama_models and "models" in ollama_models:
-            available_model_names = {model.model.split(':')[0] for model in ollama_models["models"]}
+            available_ollama_names = {model.model.split(':')[0] for model in ollama_models["models"]}
+        
+        # Get Groq models
+        groq_models = get_groq_models()
         
         # Get all models from database
         db_models = db.query(models.ModelList).all()
@@ -121,12 +162,21 @@ async def get_models(
         
         # Update existing models' availability
         for model in db_models:
-            model.is_avail = model.name in available_model_names
+            if model.model_type == "ollama":
+                model.is_avail = model.name in available_ollama_names
+            elif model.model_type == "groq":
+                model.is_avail = model.name in groq_models
         
-        # Add new models to database
-        for model_name in available_model_names - db_model_names:
-            new_model = models.ModelList(name=model_name, is_avail=True)
+        # Add new Ollama models to database
+        for model_name in available_ollama_names - db_model_names:
+            new_model = models.ModelList(name=model_name, is_avail=True, model_type="ollama")
             db.add(new_model)
+        
+        # Add Groq models if they don't exist yet
+        for model_name in groq_models:
+            if model_name not in db_model_names:
+                new_model = models.ModelList(name=model_name, is_avail=True, model_type="groq")
+                db.add(new_model)
         
         db.commit()
         
@@ -137,30 +187,29 @@ async def get_models(
                 {
                     "id": model.id,
                     "name": model.name,
-                    "is_avail": model.is_avail
+                    "is_avail": model.is_avail,
+                    "model_type": model.model_type
                 } for model in models_list
             ]
         }
         
     except Exception as e:
-        # If Ollama is not available, return database models with is_avail=False
+        # If there's an error, return database models with appropriate availability
         models_list = db.query(models.ModelList).all()
         return {
             "models": [
                 {
                     "id": model.id,
                     "name": model.name,
-                    "is_avail": False
+                    "is_avail": False if model.model_type == "ollama" else bool(GROQ_API_KEY),
+                    "model_type": model.model_type
                 } for model in models_list
             ]
         }
 
-async def stream_ai_response(prompt: str, history: List[Message], model_name: str, conversation_id: int):
+async def stream_ai_response(prompt: str, history: List[Message], model_name: str, conversation_id: int, model_type: str = "ollama"):
     """Generate AI response using structured conversation history"""
     try:
-        # Create new LLM instance
-        llm = Ollama(model=model_name)
-        
         # Get category for the conversation
         db = next(database.get_db())
         conversation = db.query(models.Conversation).filter(
@@ -188,9 +237,48 @@ async def stream_ai_response(prompt: str, history: List[Message], model_name: st
         context += f"Human: {prompt}\nAssistant:"
 
         response_text = ""
-        for chunk in llm.stream(context):
-            response_text += chunk
-            yield chunk
+        
+        # Use different LLM based on model type
+        if model_type == "ollama":
+            # Use Ollama for local models
+            llm = Ollama(model=model_name)
+            for chunk in llm.stream(context):
+                response_text += chunk
+                yield chunk
+        elif model_type == "groq":
+            # Use Groq for cloud models
+            if not GROQ_API_KEY:
+                yield "[Error] Groq API key is not configured"
+                return
+                
+            llm = ChatGroq(
+                api_key=GROQ_API_KEY,
+                model_name=model_name,
+                streaming=True
+            )
+            
+            # Format messages for ChatGroq
+            messages = [
+                {"role": "system", "content": system_prompt}
+            ]
+            
+            # Add history messages
+            if history:
+                for msg in history:
+                    role = "user" if msg.role == "user" else "assistant"
+                    messages.append({"role": role, "content": msg.content})
+            
+            # Add current question
+            messages.append({"role": "user", "content": prompt})
+            
+            # Stream response
+            for chunk in llm.stream(messages):
+                chunk_text = chunk.content
+                response_text += chunk_text
+                yield chunk_text
+        else:
+            yield f"[Error] Unsupported model type: {model_type}"
+            return
 
         # Save assistant message
         assistant_message = models.Message(
@@ -278,7 +366,8 @@ async def chat(
                 request.user_input,
                 request.history if request.remember_history else [],
                 model.name,
-                conversation.id
+                conversation.id,
+                model.model_type
             ),
             media_type="text/plain",
             headers=headers
@@ -365,12 +454,9 @@ async def delete_conversation(
         print(f"Error deleting conversation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def stream_guest_ai_response(prompt: str, history: List[Message], model_name: str, category_id: int = 1):
+async def stream_guest_ai_response(prompt: str, history: List[Message], model_name: str, category_id: int = 1, model_type: str = "ollama"):
     """Generate AI response for guest users without saving to database"""
     try:
-        # Create new LLM instance
-        llm = Ollama(model=model_name)
-        
         # Get category name from id
         db = next(database.get_db())
         category = db.query(models.Category).filter(models.Category.id == category_id).first()
@@ -396,9 +482,48 @@ async def stream_guest_ai_response(prompt: str, history: List[Message], model_na
         context += f"Human: {prompt}\nAssistant:"
 
         response_text = ""
-        for chunk in llm.stream(context):
-            response_text += chunk
-            yield chunk
+        
+        # Use different LLM based on model type
+        if model_type == "ollama":
+            # Use Ollama for local models
+            llm = Ollama(model=model_name)
+            for chunk in llm.stream(context):
+                response_text += chunk
+                yield chunk
+        elif model_type == "groq":
+            # Use Groq for cloud models
+            if not GROQ_API_KEY:
+                yield "[Error] Groq API key is not configured"
+                return
+                
+            llm = ChatGroq(
+                api_key=GROQ_API_KEY,
+                model_name=model_name,
+                streaming=True
+            )
+            
+            # Format messages for ChatGroq
+            messages = [
+                {"role": "system", "content": system_prompt}
+            ]
+            
+            # Add history messages
+            if history:
+                for msg in history:
+                    role = "user" if msg.role == "user" else "assistant"
+                    messages.append({"role": role, "content": msg.content})
+            
+            # Add current question
+            messages.append({"role": "user", "content": prompt})
+            
+            # Stream response
+            for chunk in llm.stream(messages):
+                chunk_text = chunk.content
+                response_text += chunk_text
+                yield chunk_text
+        else:
+            yield f"[Error] Unsupported model type: {model_type}"
+            return
 
     except Exception as e:
         yield f"[Error] Failed to generate response: {str(e)}"
@@ -407,22 +532,55 @@ async def stream_guest_ai_response(prompt: str, history: List[Message], model_na
 async def guest_chat(request: GuestChatRequest):
     """Handle guest chat requests and stream AI responses without saving to database"""
     try:
-        # Get available models from Ollama
-        ollama_models = ollama.list()
-        available_model_names = set()
+        # Determine model type based on the model name
+        db = next(database.get_db())
+        model = db.query(models.ModelList).filter(models.ModelList.name == request.model).first()
         
-        if ollama_models and "models" in ollama_models:
-            available_model_names = {model.model.split(':')[0] for model in ollama_models["models"]}
-        
-        if request.model not in available_model_names:
-            raise HTTPException(status_code=404, detail="Model not found")
+        if not model:
+            # Check if it's a valid Ollama model
+            ollama_models = ollama.list()
+            available_ollama_names = set()
+            
+            if ollama_models and "models" in ollama_models:
+                available_ollama_names = {model.model.split(':')[0] for model in ollama_models["models"]}
+            
+            # Get all Groq model names
+            groq_models = get_groq_models()
+            
+            if request.model in available_ollama_names:
+                # If in Ollama models, then it's Ollama type
+                model_type = "ollama"
+            elif request.model in groq_models:
+                # If in Groq models, then it's Groq type
+                model_type = "groq"
+            else:
+                raise HTTPException(status_code=404, detail="Model not found")
+        else:
+            model_type = model.model_type
+
+        # Check availability for the model type
+        if model_type == "ollama":
+            # Check if Ollama model is available
+            ollama_models = ollama.list()
+            available_names = set()
+            
+            if ollama_models and "models" in ollama_models:
+                available_names = {model.model.split(':')[0] for model in ollama_models["models"]}
+            
+            if request.model not in available_names:
+                raise HTTPException(status_code=404, detail="Ollama model not available")
+        elif model_type == "groq":
+            # Check if Groq API key is available
+            if not GROQ_API_KEY:
+                raise HTTPException(status_code=500, detail="Groq API key not configured")
 
         return StreamingResponse(
             stream_guest_ai_response(
                 request.user_input,
                 request.history,
                 request.model,
-                request.category
+                request.category,
+                model_type
             ),
             media_type="text/plain"
         )
@@ -507,7 +665,8 @@ async def get_tables(
             {
                 "id": model.id,
                 "name": model.name,
-                "is_avail": model.is_avail
+                "is_avail": model.is_avail,
+                "model_type": model.model_type
             } for model in models_list
         ]
         

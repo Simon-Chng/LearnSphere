@@ -53,6 +53,7 @@ class ModelList(Base):
         id (int): Primary key.
         name (str): Name of the model.
         is_avail (bool): Availability status of the model.
+        model_type (str): Type of model - 'ollama' or 'groq'.
         conversations (List[Conversation]): Conversations that used this model.
     """
     __tablename__ = "model_list"
@@ -60,6 +61,7 @@ class ModelList(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     is_avail = Column(Boolean, default=False)
+    model_type = Column(String(20), default="ollama")
     
     conversations = relationship("Conversation", back_populates="model")
 

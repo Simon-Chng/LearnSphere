@@ -71,9 +71,11 @@ const useChat = () => {
       console.log('Received models data:', data);
       
       if (data.models && Array.isArray(data.models)) {
-        // Save full model info
+        // Save full model info including model type
+        setAvailableModels(data.models);
+        
+        // Extract model names for checking availability
         const modelNames = data.models.map(model => model.name);
-        setAvailableModels(modelNames);
         
         // Create mapping from model name to ID
         const idMap = {};
