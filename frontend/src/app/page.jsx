@@ -267,6 +267,7 @@ export default function ChatApp() {
         setConversations={setConversations}
         currentConversationId={currentConversationId}
         setCurrentConversationId={setCurrentConversationId}
+        isGuest={isGuest}
       >
         <ConversationSidebar
           isOpen={isSidebarOpen}
